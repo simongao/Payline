@@ -113,6 +113,25 @@ def xirr(transactions):
                 step /= 2.0
     return guess - 1
 
+# 业务名称字典以适应各个券商的不同业务名称
+name_map = {'中信证券' : \
+                {'融资债务项目' : ['融资借款', '卖券偿还融资负债', '直接偿还融资负债'], \
+                '现金存取项目' : ['银行转存','银行转取','质押回购拆出','拆出质押购回'], \
+                '交易记录项目' : ['证券买入','证券卖出','融资买入','还款卖出','红股入帐','ETF现金替代退款','基金合并','基金分拆','货币ETF现金替代划入','托管转入','托管转出','开放基金赎回','开放基金赎回返款','担保品划出','担保品划入','ETF赎回基金过户'], \
+                '股息红利项目' : ['股息入帐','利息归本','股息红利税补缴'], \
+                '融资利息项目' : ['卖券偿还融资利息','卖券偿还融资费用','直接偿还融资费用'], \
+                '新股申购项目' : ['新股申购', '申购返款'], \
+                '基金赎回项目' : ['开放基金赎回'], \
+                '发生金额' : '发生金额', \
+                '证券代码' : '证券代码', \
+                '发生日期' : '发生日期', \
+                '股东代码' : '股东代码', \
+                '成交数量' : '成交数量', \
+                '成交金额' : '成交金额', \
+                '股份余额' : '股份余额', \
+                '资金本次余额' : '资金本次余额'}
+           }
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog="payline.py", fromfile_prefix_chars='@')
@@ -128,42 +147,41 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    # year = args.year
     start_date = args.start
     end_date = args.end
     LOAD_FROM_LOCAL = args.local
     fp_prefix = args.fp_prefix
-    broker = args.broker
+    broker = name_map[args.broker]
     duration = start_date.strftime('%Y%m%d') + '_' + end_date.strftime('%Y%m%d')
 
     fp = fp_prefix + 'Log_' + duration + '.csv'
-    log = pd.read_csv(fp, header=0, sep=',', converters={'发生日期' : lambda x:datetime.strptime(x,"%Y%m%d"), '证券代码' : lambda x:str(x)})
+    log = pd.read_csv(fp, header=0, sep=',', converters={broker['发生日期'] : lambda x:datetime.strptime(x,"%Y%m%d"), broker['证券代码'] : lambda x:str(x)})
 
     # 计算红利及利息
-    dividend = log[log.业务名称.isin(['股息入帐','利息归本','股息红利税补缴'])].发生金额.sum()
-    interest = log[log.业务名称.isin(['卖券偿还融资利息','卖券偿还融资费用','直接偿还融资费用'])].发生金额.sum()
+    dividend = log[log.业务名称.isin(broker['股息红利项目'])].发生金额.sum()
+    interest = log[log.业务名称.isin(broker['融资利息项目'])].发生金额.sum()
 
     # 计算现金头寸
-    cash_activities = log[log.业务名称.isin(['银行转存','银行转取','质押回购拆出','拆出质押购回'])]
+    cash_activities = log[log.业务名称.isin(broker['现金存取项目'])]
     cash_in = cash_activities.发生金额.sum()
     cash_begin = log.资金本次余额[0]+log.成交价格[0]*log.成交数量[0]
     cash_end = log.资金本次余额.iloc[-1]
 
-    cash_report = cash_activities.groupby(['发生日期']).agg({'发生金额':sum})
+    cash_report = cash_activities.groupby([broker['发生日期']]).agg({broker['发生金额']:sum})
     cash_report = cash_report[cash_report.发生金额 != 0]
 
     # 提取证券交易数据
-    trades = log[log.业务名称.isin(['证券买入','证券卖出','融资买入','还款卖出','红股入帐','ETF现金替代退款','基金合并','基金分拆','货币ETF现金替代划入','托管转入','托管转出','开放基金赎回','开放基金赎回返款','担保品划出','担保品划入','ETF赎回基金过户'])]
+    trades = log[log.业务名称.isin(broker['交易记录项目'])]
     trades.资产类别 = trades.证券代码.map(asset_category)
     trades = trades[trades.资产类别!='IPO']
 
     # 提取证券名称
-    stock_name = trades.groupby('证券代码')['证券名称'].unique()
+    stock_name = trades.groupby(broker['证券代码'])[broker['证券名称']].unique()
     stock_name = stock_name.map(lambda x: [a for a in x if str(a) != 'nan'])
     stock_name = stock_name.map(lambda x: ''.join(x))
 
     # 计算交易金额
-    stock_transaction = trades.groupby(['股东代码','证券代码']).agg({'发生金额':sum})
+    stock_transaction = trades.groupby([broker['股东代码'],broker['证券代码']]).agg({broker['发生金额']:sum})
 
     # 判断是否为港股
     trades.ishk = (trades.证券代码.str.len() == 5)
@@ -171,12 +189,12 @@ if __name__ == '__main__':
     trades_nonhk = trades[trades.ishk == False]
 
     # 计算期初期末股票持仓量
-    stock_begin_nonhk = trades_nonhk.groupby(['股东代码','证券代码']).first()['股份余额'] - trades_nonhk.groupby(['股东代码','证券代码']).first()['成交数量']
-    grouped_trades_hk = trades_hk.groupby(['股东代码','证券代码','发生日期']).agg({'股份余额':'first', '成交数量':sum})
-    grouped_trades_hk = grouped_trades_hk.groupby(level=['股东代码','证券代码']).agg({'股份余额':'first', '成交数量':'first'})
+    stock_begin_nonhk = trades_nonhk.groupby([broker['股东代码'],broker['证券代码']]).first()[broker['股份余额']] - trades_nonhk.groupby([broker['股东代码'],broker['证券代码']]).first()['成交数量']
+    grouped_trades_hk = trades_hk.groupby([broker['股东代码'],broker['证券代码'],broker['发生日期']]).agg({broker['股份余额']:'first', broker['成交数量']:sum})
+    grouped_trades_hk = grouped_trades_hk.groupby(level=[broker['股东代码'],broker['证券代码']]).agg({broker['股份余额']:'first', broker['成交数量']:'first'})
     stock_begin_hk = grouped_trades_hk.股份余额 - grouped_trades_hk.成交数量
     stock_begin = pd.concat([stock_begin_hk, stock_begin_nonhk])
-    stock_end = trades.groupby(['股东代码','证券代码']).last()['股份余额']
+    stock_end = trades.groupby([broker['股东代码'],broker['证券代码']]).last()[broker['股份余额']]
     stock_amount = pd.DataFrame({'期初持仓':stock_begin,'期末持仓':stock_end})
 
     # 获取比较基准的价格走势
@@ -259,7 +277,7 @@ if __name__ == '__main__':
     stock_position_begin.insert(0, column='发生日期', value=start_date)
     stock_position_begin = stock_position_begin.set_index('发生日期')
 
-    stock_position = trades.groupby(['发生日期','证券代码','股东代码']).agg({'成交数量':sum}).unstack(fill_value=0).sum(axis=1)
+    stock_position = trades.groupby([broker['发生日期'],broker['证券代码'],broker['股东代码']]).agg({broker['成交数量']:sum}).unstack(fill_value=0).sum(axis=1)
     stock_position = stock_position.unstack(fill_value=0)
     stock_position = pd.concat([stock_position_begin, stock_position])
     stock_position = stock_position.cumsum(axis=0)
@@ -283,23 +301,23 @@ if __name__ == '__main__':
         return c
 
 
-    ipo = log[log.业务名称.isin(['新股申购', '申购返款'])]
-    ipo_value = ipo.groupby(['发生日期', '证券代码']).agg({'发生金额': sum})
+    ipo = log[log.业务名称.isin(broker['新股申购项目'])]
+    ipo_value = ipo.groupby([broker['发生日期'], broker['证券代码']]).agg({broker['发生金额']: sum})
     ipo_value = ipo_value.unstack()
     ipo_value = ipo_value.reindex(benchmark_index)
     ipo_value = ipo_value.apply(fill_ipo_value)
     ipo_value = ipo_value.sum(axis=1)
 
     # 计算融资净债务
-    debt = log[log.业务名称.isin(['融资借款', '卖券偿还融资负债', '直接偿还融资负债'])]
-    debt_value = debt.groupby('发生日期').agg({'发生金额': sum})
+    debt = log[log.业务名称.isin(broker['融资债务项目'])]
+    debt_value = debt.groupby(broker['发生日期']).agg({broker['发生金额']: sum})
     debt_value['债务余额'] = debt_value['发生金额'].cumsum()
     debt_value = debt_value.reindex(benchmark_index, fill_value=0.0, method='ffill')
     debt_value = debt_value['债务余额']
 
     # 计算基金赎回
-    fund = log[log.业务名称.isin(['开放基金赎回'])]
-    fund_value = fund.groupby('发生日期').agg({'成交金额': sum})
+    fund = log[log.业务名称.isin(broker['基金赎回项目'])]
+    fund_value = fund.groupby(broker['发生日期']).agg({broker['成交金额']: sum})
     fund_value = fund_value.squeeze().reindex(benchmark_index, fill_value=0.0)
 
     # 计算每天的持仓市值
@@ -339,7 +357,6 @@ if __name__ == '__main__':
     returns.head()
     returns.plot(title='Time Weighted Return Rate')
     plt.savefig(fp_prefix+'TWRR_vs_Benchmark_'+duration+'.jpg')
-    plt.show()
 
     # 存储业绩回报数据
     fp = fp_prefix + 'Performance_Data_' + duration + '.csv'
@@ -352,7 +369,6 @@ if __name__ == '__main__':
     monthly_return.plot(kind='bar',title='Monthly Return (%)')
     plt.axhline(0, color='k')
     plt.savefig(fp_prefix+'monthly_return_'+duration+'.jpg')
-    plt.show()
 
     # 验算TWRR
     r = 1.0
@@ -403,9 +419,4 @@ if __name__ == '__main__':
     }
     tpl.render(context)
     tpl.save(fp_prefix+'投资业绩分析_'+duration+'.docx')
-
-
-
-
-
 
