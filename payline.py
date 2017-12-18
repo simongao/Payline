@@ -125,6 +125,7 @@ name_map = {'中信证券' : \
                 '发生金额' : '发生金额', \
                 '证券代码' : '证券代码', \
                 '发生日期' : '发生日期', \
+                '证券名称' : '证券名称', \
                 '股东代码' : '股东代码', \
                 '成交数量' : '成交数量', \
                 '成交金额' : '成交金额', \
@@ -141,7 +142,7 @@ if __name__ == '__main__':
     parser.add_argument('--end', action='store', type=(lambda s: datetime.strptime(s, '%Y-%m-%d')),
                         help='end date for example 2017-12-31')
     # parser.add_argument('--year', action='store', type=int, help='year')
-    parser.add_argument('--local', action='store_false', default=False, help='read stock price data from local storage')
+    parser.add_argument('--local', action='store_true', default=False, help='read stock price data from local storage')
     parser.add_argument('--fp_prefix', action='store', default='./', help='file path prefix')
     parser.add_argument('--broker', action='store', default='中信证券', help='broker')
 
@@ -419,4 +420,6 @@ if __name__ == '__main__':
     }
     tpl.render(context)
     tpl.save(fp_prefix+'投资业绩分析_'+duration+'.docx')
+
+    print('生产投资分析报告: '+fp_prefix+'投资业绩分析_'+duration+'.docx')
 
