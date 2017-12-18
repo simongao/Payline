@@ -122,16 +122,49 @@ name_map = {'中信证券' : \
                 '融资利息项目' : ['卖券偿还融资利息','卖券偿还融资费用','直接偿还融资费用'], \
                 '新股申购项目' : ['新股申购', '申购返款'], \
                 '基金赎回项目' : ['开放基金赎回'], \
+                '港股通收费项目' : ['港股通组合费收取'], \
                 '发生金额' : '发生金额', \
                 '证券代码' : '证券代码', \
                 '发生日期' : '发生日期', \
                 '证券名称' : '证券名称', \
                 '股东代码' : '股东代码', \
+                '成交价格' : '成交价格', \
                 '成交数量' : '成交数量', \
                 '成交金额' : '成交金额', \
                 '股份余额' : '股份余额', \
-                '资金本次余额' : '资金本次余额'}
-           }
+                '资金帐号' : '资金帐号', \
+                '手续费' : '手续费', \
+                '印花税' : '印花税', \
+                '过户费' : '过户费', \
+                '交易所清算费' : '交易所清算费', \
+                '资金本次余额' : '资金本次余额', \
+                'date_format' : "%Y%m%d"}, \
+            '平安证券' : \
+                {'融资债务项目' : ['融资借款', '卖券偿还融资负债', '直接偿还融资负债'], \
+                '现金存取项目' : ['银证转入','银证转出','OTC业务资金上账','OTC业务资金下账','基金申购','基金赎回','质押回购拆出','拆出质押购回'], \
+                '交易记录项目' : ['证券买入清算','证券卖出清算','融资买入','还款卖出','红股入帐','ETF赎回现金替代','基金合并','基金分拆','ETF现金退补','托管转入','托管转出','基金赎回清算','担保品划出','担保品划入','ETF赎回基金过户'], \
+                '股息红利项目' : ['红利发放','红股派息','深圳市场股息红利个人所得税扣款','上海市场股息红利个人所得税扣款'], \
+                '融资利息项目' : ['卖券偿还融资利息','卖券偿还融资费用','直接偿还融资费用'], \
+                '新股申购项目' : ['新股申购', '申购返款'], \
+                '基金赎回项目' : ['基金赎回x'], \
+                '港股通收费项目' : ['深港通组合费'], \
+                '发生金额' : '发生金额', \
+                '证券代码' : '证券代码', \
+                '发生日期' : '发生日期', \
+                '证券名称' : '证券名称', \
+                '股东代码' : '股东代码', \
+                '成交价格' : '成交均价', \
+                '成交数量' : '成交数量', \
+                '成交金额' : '成交金额', \
+                '股份余额' : '股份余额', \
+                '资金帐号' : '资金帐号', \
+                '手续费' : '手续费', \
+                '印花税' : '印花税', \
+                '过户费' : '过户费', \
+                '交易所清算费' : '其他费', \
+                '资金本次余额' : '资金余额', \
+                'date_format' : "%Y-%m-%d" }
+            }
 
 
 if __name__ == '__main__':
@@ -156,7 +189,7 @@ if __name__ == '__main__':
     duration = start_date.strftime('%Y%m%d') + '_' + end_date.strftime('%Y%m%d')
 
     fp = fp_prefix + 'Log_' + duration + '.csv'
-    log = pd.read_csv(fp, header=0, sep=',', converters={broker['发生日期'] : lambda x:datetime.strptime(x,"%Y%m%d"), broker['证券代码'] : lambda x:str(x)})
+    log = pd.read_csv(fp, header=0, sep=',', converters={broker['发生日期'] : lambda x:datetime.strptime(x,broker['date_format']), broker['证券代码'] : lambda x:str(x)})
 
     # 计算红利及利息
     dividend = log[log.业务名称.isin(broker['股息红利项目'])].发生金额.sum()
@@ -165,8 +198,8 @@ if __name__ == '__main__':
     # 计算现金头寸
     cash_activities = log[log.业务名称.isin(broker['现金存取项目'])]
     cash_in = cash_activities.发生金额.sum()
-    cash_begin = log.资金本次余额[0]+log.成交价格[0]*log.成交数量[0]
-    cash_end = log.资金本次余额.iloc[-1]
+    cash_begin = log[broker['资金本次余额']][0]+log[broker['成交价格']][0]*log[broker['成交数量']][0]
+    cash_end = log[broker['资金本次余额']].iloc[-1]
 
     cash_report = cash_activities.groupby([broker['发生日期']]).agg({broker['发生金额']:sum})
     cash_report = cash_report[cash_report.发生金额 != 0]
@@ -210,7 +243,8 @@ if __name__ == '__main__':
     if (LOAD_FROM_LOCAL==False):
         stock_close_price = pd.DataFrame(index=benchmark_index, columns=stock_list)
         for code in stock_list:
-            stock_close_price[code] = get_close_price(code, start_date, end_date)
+            if(code != '') :
+                stock_close_price[code] = get_close_price(code, start_date, end_date)
         stock_close_price = stock_close_price.sort_index(ascending='ascending')
         stock_close_price = stock_close_price.ffill().fillna(0.0)
         stock_close_price = stock_close_price.reindex(benchmark_index, fill_value=0, method='ffill')
@@ -248,12 +282,12 @@ if __name__ == '__main__':
     stocks = stocks.round({'发生金额':0, '期初持仓':0, '期末持仓':0, '期初价格':2, '期末价格':2, '盈亏':0})
 
     # 计算交易费用，包括手续费、印花税、过户费、交易所清算费、融资利息
-    trade_cost = trades.手续费.sum() + trades.印花税.sum() + trades.过户费.sum() + trades.交易所清算费.sum()
-    # trade_cost = tradecost - trades[trades.业务名称.isin(['港股通组合费收取'])].发生金额.sum()
+    trade_cost = trades[broker['手续费']].sum() + trades[broker['印花税']].sum() + trades[broker['过户费']].sum() + trades[broker['交易所清算费']].sum()
+    trade_cost = trade_cost - trades[trades.业务名称.isin(broker['港股通收费项目'])].发生金额.sum()
 
     # 计算摘牌市值
-    unlisted = log[log.业务名称.isin(['托管转出'])]
-    unlisted_value = (unlisted.成交价格 * unlisted.成交数量).sum()
+    # unlisted = log[log.业务名称.isin(['托管转出'])]
+    # unlisted_value = (unlisted.成交价格 * unlisted.成交数量).sum()
 
     # 计算投入资金和盈亏比例
     capital = cash_begin + cash_in + (stocks.期初持仓*stocks.期初价格).sum()
@@ -286,7 +320,7 @@ if __name__ == '__main__':
 
     # 计算每天的资金余额
     cash_balance_begin = pd.Series({start_date:cash_begin})
-    cash_balance = log.groupby(['发生日期','资金帐号']).last()['资金本次余额'].unstack()
+    cash_balance = log.groupby([broker['发生日期'],broker['资金帐号']]).last()[broker['资金本次余额']].unstack()
     cash_balance = cash_balance.ffill().fillna(0.0).sum(axis=1)
     cash_balance = pd.concat([cash_balance_begin, cash_balance])
     cash_balance = cash_balance.reindex(benchmark_index, fill_value=0, method='ffill')
@@ -384,7 +418,9 @@ if __name__ == '__main__':
     t = net_value_adj / net_value.shift(1)
     t = t.replace([np.inf, -np.inf], np.nan).fillna(1.0)
     abnormal_data = pd.concat([t[t>1.1], t[t<0.9]]).sort_index()
-    if (len(abnormal_data)>0): print(abnormal_data.head())
+    if (len(abnormal_data)>0):
+        print("发现异常数据点：")
+        print(abnormal_data.head(100))
 
 
     # 生成Word格式报告
@@ -421,5 +457,5 @@ if __name__ == '__main__':
     tpl.render(context)
     tpl.save(fp_prefix+'投资业绩分析_'+duration+'.docx')
 
-    print('生产投资分析报告: '+fp_prefix+'投资业绩分析_'+duration+'.docx')
+    print('成功生成投资分析报告: '+fp_prefix+'投资业绩分析_'+duration+'.docx')
 
