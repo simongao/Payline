@@ -138,6 +138,7 @@ name_map = {'中信证券' : \
                 '过户费' : '过户费', \
                 '交易所清算费' : '交易所清算费', \
                 '资金本次余额' : '资金本次余额', \
+                '反号业务项目' : [], \
                 'date_format' : "%Y%m%d"}, \
             '平安证券' : \
                 {'融资债务项目' : ['融资借款', '卖券偿还融资负债', '直接偿还融资负债'], \
@@ -146,7 +147,7 @@ name_map = {'中信证券' : \
                 '股息红利项目' : ['红利发放','红股派息','深圳市场股息红利个人所得税扣款','上海市场股息红利个人所得税扣款'], \
                 '融资利息项目' : ['卖券偿还融资利息','卖券偿还融资费用','直接偿还融资费用'], \
                 '新股申购项目' : ['新股申购', '申购返款'], \
-                '基金赎回项目' : ['基金赎回x'], \
+                '基金赎回项目' : [], \
                 '港股通收费项目' : ['深港通组合费'], \
                 '发生金额' : '发生金额', \
                 '证券代码' : '证券代码', \
@@ -163,6 +164,7 @@ name_map = {'中信证券' : \
                 '过户费' : '过户费', \
                 '交易所清算费' : '其他费', \
                 '资金本次余额' : '资金余额', \
+                '反号业务项目' : ['证券卖出清算','基金赎回清算'], \
                 'date_format' : "%Y-%m-%d" }
             }
 
@@ -198,7 +200,8 @@ if __name__ == '__main__':
     # 计算现金头寸
     cash_activities = log[log.业务名称.isin(broker['现金存取项目'])]
     cash_in = cash_activities.发生金额.sum()
-    cash_begin = log[broker['资金本次余额']][0]+log[broker['成交价格']][0]*log[broker['成交数量']][0]
+    #cash_begin = log[broker['资金本次余额']][0]+log[broker['成交价格']][0]*log[broker['成交数量']][0]
+    cash_begin = log[broker['资金本次余额']][0] - log[broker['发生金额']][0]
     cash_end = log[broker['资金本次余额']].iloc[-1]
 
     cash_report = cash_activities.groupby([broker['发生日期']]).agg({broker['发生金额']:sum})
@@ -206,8 +209,11 @@ if __name__ == '__main__':
 
     # 提取证券交易数据
     trades = log[log.业务名称.isin(broker['交易记录项目'])]
-    trades.资产类别 = trades.证券代码.map(asset_category)
-    trades = trades[trades.资产类别!='IPO']
+    trades = trades[trades[broker['证券代码']] != '']
+    trades.资产类别 = trades[broker['证券代码']].map(asset_category)
+    trades = trades[trades.资产类别 != 'IPO']
+    sign = trades.业务名称.isin(broker['反号业务项目']).map({True:-1, False:1})
+    trades[broker['成交数量']] = trades[broker['成交数量']].mul(sign)
 
     # 提取证券名称
     stock_name = trades.groupby(broker['证券代码'])[broker['证券名称']].unique()
@@ -235,7 +241,7 @@ if __name__ == '__main__':
     hs300 = get_close_price('000300', start_date, end_date)
     benchmark_index = hs300.index
 
-    stock_list = list(trades.证券代码.unique())
+    stock_list = list(trades[broker['证券代码']].unique())
 
     fp = fp_prefix + duration + '_close_price.csv'
 
@@ -244,6 +250,7 @@ if __name__ == '__main__':
         stock_close_price = pd.DataFrame(index=benchmark_index, columns=stock_list)
         for code in stock_list:
             if(code != '') :
+                print("正在查询%s的行情数据......" % code)
                 stock_close_price[code] = get_close_price(code, start_date, end_date)
         stock_close_price = stock_close_price.sort_index(ascending='ascending')
         stock_close_price = stock_close_price.ffill().fillna(0.0)
@@ -253,6 +260,7 @@ if __name__ == '__main__':
 
     # 本地读取期组合收盘价
     if (LOAD_FROM_LOCAL==True):
+        print("正在从%s读取行情数据......" % fp)
         stock_close_price = pd.read_csv(fp, header=0, sep=',', converters={'datetime' : lambda x:datetime.strptime(x,"%Y-%m-%d")}, index_col='datetime')
         stock_close_price = stock_close_price.sort_index(ascending='ascending')
         stock_close_price = stock_close_price.ffill().fillna(0.0)
@@ -369,9 +377,11 @@ if __name__ == '__main__':
     net_value_adj = net_value - cash_deposit
 
     # 计算投资组合的时间加权回报率
-    twrr_portfolio = net_value_adj / net_value.shift(1)
-    twrr_portfolio = twrr_portfolio.replace([np.inf, -np.inf], np.nan).fillna(1.0)
-    twrr_portfolio = twrr_portfolio.cumprod()
+    twrr_portfolio_daily_gain = net_value_adj / net_value.shift(1)
+    twrr_portfolio_daily_gain = twrr_portfolio_daily_gain.replace([np.inf, -np.inf], np.nan).fillna(1.0)
+    low_value = net_value_adj<5000
+    twrr_portfolio_daily_gain.loc[low_value] = 1.0
+    twrr_portfolio = twrr_portfolio_daily_gain.cumprod()
     twrr_portfolio_value = twrr_portfolio[-1] - 1.0
 
     # 计算比较基准的时间加权回报率
@@ -389,8 +399,8 @@ if __name__ == '__main__':
 
     # 绘制时间加权收益曲线图
     returns = pd.DataFrame({'Portfolio':twrr_portfolio,'Benchmark':twrr_benchmark})
-    returns.head()
-    returns.plot(title='Time Weighted Return Rate')
+    ax = returns.plot(kind='line', color=['steelblue','darkorange'])
+    ax.set_title('时间加权收益率', fontname='Simhei', fontsize=18)
     plt.savefig(fp_prefix+'TWRR_vs_Benchmark_'+duration+'.jpg')
 
     # 存储业绩回报数据
@@ -401,7 +411,8 @@ if __name__ == '__main__':
     monthly_return_portfolio = twrr_portfolio.groupby([twrr_portfolio.index.year, twrr_portfolio.index.month]).apply(total_returns) * 100
     monthly_return_benchmark = twrr_benchmark.groupby([twrr_benchmark.index.year, twrr_benchmark.index.month]).apply(total_returns) * 100
     monthly_return = pd.DataFrame({'Portfolio':monthly_return_portfolio,'Benchmark':monthly_return_benchmark})
-    monthly_return.plot(kind='bar',title='Monthly Return (%)')
+    ax = monthly_return.plot(kind='bar', color=['steelblue','darkorange'], edgecolor='none')
+    ax.set_title('月度收益率(%)', fontname='Simhei', fontsize=18)
     plt.axhline(0, color='k')
     plt.savefig(fp_prefix+'monthly_return_'+duration+'.jpg')
 
@@ -415,8 +426,7 @@ if __name__ == '__main__':
     r = r * (net_value[-1]) / net_value_prev
 
     # 检验是否有数据异常
-    t = net_value_adj / net_value.shift(1)
-    t = t.replace([np.inf, -np.inf], np.nan).fillna(1.0)
+    t = twrr_portfolio_daily_gain
     abnormal_data = pd.concat([t[t>1.1], t[t<0.9]]).sort_index()
     if (len(abnormal_data)>0):
         print("发现异常数据点：")
