@@ -190,8 +190,10 @@ if __name__ == '__main__':
     broker = name_map[args.broker]
     duration = start_date.strftime('%Y%m%d') + '_' + end_date.strftime('%Y%m%d')
 
-    fp = fp_prefix + 'Log_' + duration + '.csv'
-    log = pd.read_csv(fp, header=0, sep=',', converters={broker['发生日期'] : lambda x:datetime.strptime(x,broker['date_format']), broker['证券代码'] : lambda x:str(x)})
+    #fp = fp_prefix + 'Log_' + duration + '.csv'
+    #log = pd.read_csv(fp, header=0, sep=',', converters={broker['发生日期'] : lambda x:datetime.strptime(x,broker['date_format']), broker['证券代码'] : lambda x:str(x)})
+    fp = fp_prefix + 'Log_' + duration + '.xlsx'
+    log = pd.read_excel(fp, header=0, converters={broker['发生日期'] : lambda x:datetime.strptime(str(x),broker['date_format']), broker['证券代码'] : lambda x:str(x)})
 
     # 计算红利及利息
     dividend = log[log.业务名称.isin(broker['股息红利项目'])].发生金额.sum()
@@ -200,7 +202,6 @@ if __name__ == '__main__':
     # 计算现金头寸
     cash_activities = log[log.业务名称.isin(broker['现金存取项目'])]
     cash_in = cash_activities.发生金额.sum()
-    #cash_begin = log[broker['资金本次余额']][0]+log[broker['成交价格']][0]*log[broker['成交数量']][0]
     cash_begin = log[broker['资金本次余额']][0] - log[broker['发生金额']][0]
     cash_end = log[broker['资金本次余额']].iloc[-1]
 
@@ -208,6 +209,7 @@ if __name__ == '__main__':
     cash_report = cash_report[cash_report.发生金额 != 0]
 
     # 提取证券交易数据
+    # 剔除新股以及无证券代码的记录
     trades = log[log.业务名称.isin(broker['交易记录项目'])]
     trades = trades[trades[broker['证券代码']] != '']
     trades.资产类别 = trades[broker['证券代码']].map(asset_category)
@@ -401,18 +403,25 @@ if __name__ == '__main__':
     returns = pd.DataFrame({'Portfolio':twrr_portfolio,'Benchmark':twrr_benchmark})
     ax = returns.plot(kind='line', color=['steelblue','darkorange'])
     ax.set_title('时间加权收益率', fontname='Simhei', fontsize=18)
+    ax.annotate('{:.2f}'.format(twrr_benchmark[-1]), xy=(returns.index[-1], twrr_benchmark[-1]))
+    ax.annotate('{:.2f}'.format(twrr_portfolio[-1]), xy=(returns.index[-1], twrr_portfolio[-1]))
+    ax.set_xlabel('')
     plt.savefig(fp_prefix+'TWRR_vs_Benchmark_'+duration+'.jpg')
 
     # 存储业绩回报数据
     fp = fp_prefix + 'Performance_Data_' + duration + '.csv'
     returns.to_csv(fp, float_format='%8.3f', sep=",", encoding='utf-8')
 
-    # 计算月度回报
-    monthly_return_portfolio = twrr_portfolio.groupby([twrr_portfolio.index.year, twrr_portfolio.index.month]).apply(total_returns) * 100
-    monthly_return_benchmark = twrr_benchmark.groupby([twrr_benchmark.index.year, twrr_benchmark.index.month]).apply(total_returns) * 100
-    monthly_return = pd.DataFrame({'Portfolio':monthly_return_portfolio,'Benchmark':monthly_return_benchmark})
-    ax = monthly_return.plot(kind='bar', color=['steelblue','darkorange'], edgecolor='none')
-    ax.set_title('月度收益率(%)', fontname='Simhei', fontsize=18)
+    # 计算年度或月度回报，两年内计算月度收益率，超过2年计算年度收益率
+    if ((twrr_portfolio.index.year[-1] - twrr_portfolio.index.year[0]) > 1) :
+        breakdown_period = [twrr_portfolio.index.year]
+    else:
+        breakdown_period = [twrr_portfolio.index.year, twrr_portfolio.index.month]
+    return_breakdown_portfolio = twrr_portfolio.groupby(breakdown_period).apply(total_returns) * 100
+    return_breakdown_benchmark = twrr_benchmark.groupby(breakdown_period).apply(total_returns) * 100
+    return_breakdown = pd.DataFrame({'Portfolio':return_breakdown_portfolio,'Benchmark':return_breakdown_benchmark})
+    ax = return_breakdown.plot(kind='bar', color=['steelblue','darkorange'], edgecolor='none')
+    ax.set_title('各期收益率(%)', fontname='Simhei', fontsize=18)
     plt.axhline(0, color='k')
     plt.savefig(fp_prefix+'monthly_return_'+duration+'.jpg')
 

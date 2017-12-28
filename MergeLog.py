@@ -20,9 +20,9 @@ if __name__ == "__main__":
     remove_repeated_header = args.remove_repeated_header
 
     header_saved = False
-    with open(fp_prefix+outfile, 'w', encoding='utf-8') as fout:
+    with open(fp_prefix+outfile, 'w') as fout:
         for filename in in_files:
-            with open(fp_prefix+filename, encoding='utf-8') as fin:
+            with open(fp_prefix+filename) as fin:
                 header = next(fin)
                 if not header_saved:
                     fout.write(header)  # you may need to work here. The writerows require an iterable.
