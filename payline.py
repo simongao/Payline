@@ -73,9 +73,9 @@ def drawdown(timeseries):
     return (float(timeseries[i]) / timeseries[j]) - 1.0
 
 
-# 定义夏普比率
+# 计算夏普比率 (日均收益率*250-3%) / (日均波动率*squareroot(250))
 def sharpe(rets, rf=0.0, ann=252):
-    return (rets.mean() - rf / ann) / rets.std() * np.sqrt(ann)
+    return (rets.mean()*ann - rf) / (rets.std() * np.sqrt(ann))
 
 
 # 计算回报率
