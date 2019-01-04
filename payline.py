@@ -22,6 +22,7 @@ def asset_category(code):
     if (len(code) == 6 and (code.startswith('204') or code.startswith('131'))): category = 'REPO'
     if (len(code) == 6 and (code.startswith('7') or code.startswith('07'))): category = 'IPO'
     if (code == '000300' or code == '399300'): category = 'INDEX'
+    if (code == '832818'): category = 'UNLISTED'
     return category
 
 # 查询股票价格
@@ -42,7 +43,7 @@ def get_close_price(code, start, end=datetime.today(), freq='D'):
         if (asset_category(code) == 'XSB'): asset = 'X'
         if (asset_category(code) == 'INDEX'): asset = 'INDEX'
         try:
-            cons = ts.get_apis()
+            #cons = ts.get_apis()
             s = ts.bar(code, conn=cons, freq='D', start_date=start, end_date=end, asset=asset)
             close_price = s['close']
         except:
@@ -209,11 +210,12 @@ if __name__ == '__main__':
     cash_report = cash_report[cash_report.发生金额 != 0]
 
     # 提取证券交易数据
-    # 剔除新股以及无证券代码的记录
+    # 剔除新股、摘牌以及无证券代码的记录
     trades = log[log.业务名称.isin(broker['交易记录项目'])]
     trades = trades[trades[broker['证券代码']] != '']
-    trades.资产类别 = trades[broker['证券代码']].map(asset_category)
+    trades['资产类别'] = trades[broker['证券代码']].map(asset_category)
     trades = trades[trades.资产类别 != 'IPO']
+    trades = trades[trades.资产类别 != 'UNLISTED']
     sign = trades.业务名称.isin(broker['反号业务项目']).map({True:-1, False:1})
     trades[broker['成交数量']] = trades[broker['成交数量']].mul(sign)
 
@@ -226,7 +228,7 @@ if __name__ == '__main__':
     stock_transaction = trades.groupby([broker['股东代码'],broker['证券代码']]).agg({broker['发生金额']:sum})
 
     # 判断是否为港股
-    trades.ishk = (trades.证券代码.str.len() == 5)
+    trades['ishk'] = (trades.证券代码.str.len() == 5)
     trades_hk = trades[trades.ishk == True]
     trades_nonhk = trades[trades.ishk == False]
 
@@ -239,6 +241,10 @@ if __name__ == '__main__':
     stock_end = trades.groupby([broker['股东代码'],broker['证券代码']]).last()[broker['股份余额']]
     stock_amount = pd.DataFrame({'期初持仓':stock_begin,'期末持仓':stock_end})
 
+    # 建立TuShare连接
+    cons = ts.get_apis()
+
+
     # 获取比较基准的价格走势
     hs300 = get_close_price('000300', start_date, end_date)
     benchmark_index = hs300.index
@@ -249,6 +255,7 @@ if __name__ == '__main__':
 
     # 远程查询组合收盘价
     if (LOAD_FROM_LOCAL==False):
+
         stock_close_price = pd.DataFrame(index=benchmark_index, columns=stock_list)
         for code in stock_list:
             if(code != '') :
@@ -271,7 +278,8 @@ if __name__ == '__main__':
 
     # 提取期初和期末股票价格
     stock_price = stock_close_price.T
-    stock_price = stock_price[[0,-1]]
+    #stock_price = stock_price[[0,-1]]
+    stock_price = stock_price.iloc[:, [0, -1]]
     stock_price.index.rename('证券代码', inplace=True)
     stock_price.rename(columns={stock_price.columns[0]:'期初价格', stock_price.columns[1]:'期末价格'}, inplace=True)
 
